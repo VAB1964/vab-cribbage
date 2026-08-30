@@ -1,4 +1,4 @@
-{
+{
   "$schema": "./node_modules/wrangler/config-schema.json",
   "name": "vab-cribbage-staging",
   "main": "worker/src/index.ts",
