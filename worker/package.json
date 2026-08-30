@@ -1,4 +1,4 @@
-{
+{
   "name": "cribbage-room",
   "version": "0.1.0",
   "private": true,
@@ -7,7 +7,7 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "types": "wrangler types",
-    "check": "wrangler deploy --dry-run"
+    "check": "wrangler deploy --dry-run --config ../wrangler.jsonc"
   },
   "dependencies": {
     "zod": "^4.0.0"
