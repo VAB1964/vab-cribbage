@@ -9,3 +9,5 @@ This repository is being populated from the original `Word-Puzzle-Project` as pa
 - `app/` contains the React/Vite game.
 - `worker/` contains the multiplayer Durable Object service.
 - Root build files provide the combined Cloudflare staging deployment.
+
+Cloudflare staging builds use `app/` as the configured build root and deploy the Worker from `worker/`.
