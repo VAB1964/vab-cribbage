@@ -5,7 +5,9 @@
   "scripts": {
     "build": "npm ci --prefix app && npm run build --prefix app && npm ci --prefix worker",
     "test": "npm test --prefix app && npm test --prefix worker",
-    "check": "npm run build && npm run typecheck --prefix worker && npm run check --prefix worker"
+    "check": "npm run build && npm run typecheck --prefix worker && npm run check --prefix worker",
+    "deploy:staging": "npx wrangler deploy --config wrangler.staging.jsonc",
+    "deploy:prod": "npx wrangler deploy --config wrangler.prod.jsonc"
   },
   "devDependencies": {
     "wrangler": "latest"
