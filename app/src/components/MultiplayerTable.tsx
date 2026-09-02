@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, MouseEvent, ReactNode } from "react";
 import { configureGameAudio, playGameSound, unlockGameAudio } from "../audio/gameAudio";
 import { playScriptedDialogue } from "../audio/scriptedDialogue";
 import { avatarById, type PlayerPreferences } from "../identity/preferences";
@@ -770,8 +770,14 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
     }
     previousDealNumber.current = dealNumber;
   }, [state.dealNumber]);
+  const onButtonClickCapture = (event: MouseEvent<HTMLElement>) => {
+    const button = (event.target as HTMLElement).closest("button");
+    if (!button) return;
+    unlockGameAudio();
+    playGameSound("click");
+  };
 
-  return <main className="mp-table">
+  return <main className="mp-table" onClickCapture={onButtonClickCapture}>
     <header className="mp-board">
       <div><span className="eyebrow">Private table · {titlePhase(phase)}</span><h1>Cribbage</h1></div>
       <div className="mp-game-actions"><div className={`mp-connection ${connection}`}>{connection === "connected" ? "Live" : "Reconnecting…"}</div><button className="quiet" onClick={() => setShowHistory(true)}>History</button><button className="quiet" onClick={onLeave}>Leave table</button></div>

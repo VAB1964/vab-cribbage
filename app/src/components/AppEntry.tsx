@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import CribbageGame from "../CribbageGame";
-import { configureGameAudio, unlockGameAudio } from "../audio/gameAudio";
+import { configureGameAudio, playGameSound, unlockGameAudio } from "../audio/gameAudio";
 import { MultiplayerController, type MultiplayerSnapshot, type RoomMessage } from "../controllers/MultiplayerController";
 import { AVATARS, avatarById, loadPreferences, savePreferences, type PlayerPreferences } from "../identity/preferences";
 import type { ConnectionState } from "../multiplayer/protocol";
@@ -15,21 +15,21 @@ function roomCodeFromLocation() {
   return /^[A-Z0-9]{6}$/i.test(query ?? "") ? query!.toUpperCase() : "";
 }
 
-function Identity({ value, onConfirm, onBack }: { value: PlayerPreferences; onConfirm: (value: PlayerPreferences) => void; onBack: () => void }) {
+function Identity({ value, onConfirm, onBack, compact = false }: { value: PlayerPreferences; onConfirm: (value: PlayerPreferences) => void; onBack: () => void; compact?: boolean }) {
   const [draft, setDraft] = useState(value);
   return <section className="entry-card identity-card">
-    <span className="eyebrow">Your chair at the table</span><h2>Player identity</h2>
+    {!compact && <><span className="eyebrow">Your chair at the table</span><h2>Player identity</h2></>}
     <label>Display name<input maxLength={24} autoComplete="nickname" value={draft.displayName} onChange={event => setDraft({ ...draft, displayName: event.target.value })} /></label>
     <fieldset><legend>Choose an avatar</legend><div className="avatar-grid">
       {AVATARS.map(avatar => <button key={avatar.id} className={draft.avatarId === avatar.id ? "selected" : ""} aria-pressed={draft.avatarId === avatar.id} aria-label={avatar.label} onClick={() => setDraft({ ...draft, avatarId: avatar.id })}><img src={avatar.src} alt="" /><small>{avatar.label}</small></button>)}
     </div></fieldset>
-    <div className="preference-grid">
+    {!compact && <div className="preference-grid">
       <label><input type="checkbox" checked={draft.soundEnabled} onChange={event => setDraft({ ...draft, soundEnabled: event.target.checked })} /> Sound</label>
       <label><input type="checkbox" checked={draft.voiceEnabled} onChange={event => setDraft({ ...draft, voiceEnabled: event.target.checked })} /> Table-talk voice</label>
       <label><input type="checkbox" checked={draft.reducedAnimation} onChange={event => setDraft({ ...draft, reducedAnimation: event.target.checked })} /> Reduced animation</label>
       <label>Volume<input type="range" min="0" max="1" step=".05" value={draft.volume} onChange={event => setDraft({ ...draft, volume: Number(event.target.value) })} /></label>
       <label>Table talk<select value={draft.tableTalk} onChange={event => setDraft({ ...draft, tableTalk: event.target.value as PlayerPreferences["tableTalk"] })}><option value="off">Off</option><option value="occasional">Occasional</option><option value="chatty">Chatty</option></select></label>
-    </div>
+    </div>}
     <div className="entry-actions"><button className="quiet" onClick={onBack}>Back</button><button className="primary" disabled={!draft.displayName.trim()} onClick={() => onConfirm({ ...draft, displayName: draft.displayName.trim() })}>Continue</button></div>
   </section>;
 }
@@ -176,15 +176,24 @@ export default function AppEntry() {
   const [createRoomIntent, setCreateRoomIntent] = useState(false);
   const [roomError, setRoomError] = useState("");
   const [creatingRoom, setCreatingRoom] = useState(false);
+  useEffect(() => {
+    configureGameAudio(preferences.soundEnabled, preferences.volume);
+  }, [preferences.soundEnabled, preferences.volume]);
+  const onEntryButtonClick = (event: MouseEvent<HTMLElement>) => {
+    const button = (event.target as HTMLElement).closest("button");
+    if (!button) return;
+    unlockGameAudio();
+    playGameSound("click");
+  };
   const confirmIdentity = (next: PlayerPreferences) => {
     savePreferences(next); setPreferences(next);
     setScreen(pendingMode === "single" ? "single" : inviteCode ? "lobby" : "room");
   };
   if (screen === "single") return <div className={preferences.reducedAnimation ? "reduce-animation" : ""}><CribbageGame initialPreferences={preferences} onExit={() => setScreen("mode")} /></div>;
-  if (screen === "lobby") return <main className={`multiplayer-shell ${preferences.reducedAnimation ? "reduce-animation" : ""}`}><Lobby code={roomCode} preferences={preferences} create={createRoomIntent} onLeave={() => setScreen("mode")} /></main>;
-  return <main className={`entry-shell ${preferences.reducedAnimation ? "reduce-animation" : ""}`}>
+  if (screen === "lobby") return <main className={`multiplayer-shell ${preferences.reducedAnimation ? "reduce-animation" : ""}`} onClickCapture={onEntryButtonClick}><Lobby code={roomCode} preferences={preferences} create={createRoomIntent} onLeave={() => setScreen("mode")} /></main>;
+  return <main className={`entry-shell ${preferences.reducedAnimation ? "reduce-animation" : ""}`} onClickCapture={onEntryButtonClick}>
     {screen === "mode" && <section className="entry-card mode-card"><span className="eyebrow">A classic card-room game</span><h1>Pull up a chair.</h1><p>Choose local play against the computer or join friends at a private online table.</p><div className="mode-picks"><button onClick={() => { setPendingMode("single"); setScreen("identity"); }}><strong>Single Player</strong><span>Play locally with familiar AI opponents.</span></button><button onClick={() => { setPendingMode("multiplayer"); setScreen("identity"); }}><strong>Multiplayer</strong><span>Create or join a private room.</span></button></div><a href="https://vabgames.com">Back to VABGames.com</a></section>}
-    {screen === "identity" && <Identity value={preferences} onConfirm={confirmIdentity} onBack={() => setScreen("mode")} />}
+    {screen === "identity" && <Identity value={preferences} onConfirm={confirmIdentity} onBack={() => setScreen("mode")} compact={pendingMode === "multiplayer"} />}
     {screen === "room" && <section className="entry-card room-choice"><span className="eyebrow">Private online room</span><h2>Create or join</h2>{roomError && <p role="alert" className="error-message">{roomError}</p>}<button className="primary" disabled={creatingRoom} onClick={() => { setCreatingRoom(true); setRoomError(""); void fetch("/api/cribbage/rooms", { method: "POST", headers: { "content-type": "application/json", accept: "application/json" }, body: "{}" }).then(async response => { const contentType = response.headers.get("content-type") ?? ""; const body = contentType.includes("application/json") ? await response.json() as { roomId?: string; error?: { message?: string } } : null; if (!response.ok || !body?.roomId) throw new Error(body?.error?.message ?? `Room service unavailable (${response.status}).`); setRoomCode(body.roomId); setCreateRoomIntent(true); setScreen("lobby"); }).catch(error => setRoomError(error instanceof Error ? error.message : "Unable to create a room.")).finally(() => setCreatingRoom(false)); }}>{creatingRoom ? "Creating…" : "Create game"}</button><div className="join-divider">or</div><label>Room code or invite link<input value={roomInput} onChange={event => setRoomInput(event.target.value)} placeholder="7KQ4MT or invite link" /></label><button disabled={!roomInput.trim()} onClick={() => { const match = roomInput.toUpperCase().match(/([A-HJ-NP-Z2-9]{6})(?:\/?$)/); if (match) { setRoomCode(match[1]); setCreateRoomIntent(false); setScreen("lobby"); } else setRoomError("Enter a valid six-character room code or invite link."); }}>Join game</button><button className="quiet" onClick={() => setScreen("mode")}>Back</button></section>}
   </main>;
 }

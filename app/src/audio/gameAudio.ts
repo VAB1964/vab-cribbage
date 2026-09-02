@@ -1,4 +1,4 @@
-export type GameSound = "shuffle" | "deal" | "card" | "peg" | "count";
+export type GameSound = "shuffle" | "deal" | "card" | "peg" | "count" | "click";
 
 let context: AudioContext | null = null;
 let enabled = true;
@@ -57,7 +57,9 @@ function noise(duration: number, delay: number, level: number) {
 }
 
 export function playGameSound(sound: GameSound) {
-  if (sound === "shuffle") {
+  if (sound === "click") {
+    tone(520, 0.045, 0, "triangle", 0.07);
+  } else if (sound === "shuffle") {
     for (let index = 0; index < 7; index += 1) noise(0.065, index * 0.045, 0.055);
     tone(175, 0.14, 0.3, "triangle", 0.035);
   } else if (sound === "deal") {
