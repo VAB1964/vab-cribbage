@@ -285,12 +285,17 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible { 
 
 @media (min-width:721px) and (max-width:1024px) {
   .mp-board { padding:10px 12px 12px; }
-  .mp-tabletop { min-height:calc(100vh - 105px); overflow:visible; }
+  .mp-tabletop { display:block; min-height:calc(100vh - 105px); overflow:visible; }
   .mp-center { grid-template-columns:.75fr 1.25fr; min-height:145px; }
   .mp-center>div { min-height:145px; padding:10px; }
   .mp-center>div:nth-child(1),.mp-center>div:nth-child(2) { min-width:0; }
   .mp-center>div:nth-child(1) { display:grid; justify-items:center; }
-  .mp-opponents,.mp-player,.mp-opponents .mp-player { overflow:visible; }
+  .mp-opponents { display:grid; grid-template-columns:repeat(3,1fr); overflow:visible; }
+  .mp-player,.mp-opponents .mp-player { overflow:visible; }
+  .mp-opponents .mp-player { display:block; text-align:center; }
+  .mp-opponents .mp-player>div:not(.mp-player-notice) { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .mp-player.local { min-height:170px; }
+  .mp-local-hand { justify-content:center; overflow:visible; padding-top:10px; }
 
   .mp-prompt { grid-column:1/-1; min-height:auto !important; flex-direction:column; align-items:center; justify-content:center; gap:8px; border-top:1px solid #c99b554d !important; text-align:center; }
   .mp-prompt>strong { order:2; margin:0; }
