@@ -67,6 +67,27 @@ describe("GameRoom authority", () => {
     expect(await send("START_GAME", {}, host.id)).toMatchObject({ ok: true, event: { type: "START_GAME_ACCEPTED" } });
   });
 
+  it("lets the host swap seated players through setup updates", async () => {
+    const hostData = acceptedData(await send("CREATE_ROOM", { name: "Host", avatarId: "m-1", seatCount: 4 }));
+    const hostId = String(hostData.playerId);
+    const guestOne = String(acceptedData(await send("JOIN_ROOM", { name: "Guest 1", avatarId: "f-1" })).playerId);
+    const guestTwo = String(acceptedData(await send("JOIN_ROOM", { name: "Guest 2", avatarId: "f-2" })).playerId);
+    acceptedData(await send("ADD_AI", { seat: 3, difficulty: "medium" }, hostId));
+    acceptedData(await send("UPDATE_SETUP", { targetPlayerId: guestTwo, seat: 0 }, hostId));
+    let view = await stub.viewForTest(hostId);
+    const aiId = String(view?.players.find((player) => player.isAI)?.id);
+    acceptedData(await send("UPDATE_SETUP", { targetPlayerId: aiId, seat: 1 }, hostId));
+    view = await stub.viewForTest(hostId);
+    expect(view?.players.find((player) => player.id === guestTwo)?.seat).toBe(0);
+    expect(view?.players.find((player) => player.id === guestTwo)?.teamId).toBe("gold");
+    expect(view?.players.find((player) => player.id === aiId)?.seat).toBe(1);
+    expect(view?.players.find((player) => player.id === aiId)?.teamId).toBe("green");
+    expect(view?.players.find((player) => player.id === guestOne)?.seat).toBe(3);
+    expect(view?.players.find((player) => player.id === guestOne)?.teamId).toBe("green");
+    expect(view?.players.find((player) => player.id === hostId)?.seat).toBe(2);
+    expect(view?.players.find((player) => player.id === hostId)?.teamId).toBe("gold");
+  });
+
   it("rejects stale commands and caches duplicate results", async () => {
     const host = await createHost();
     const stale = await stub.executeForTest(command("SET_READY", { ready: true }, host.id, crypto.randomUUID(), 0));

@@ -241,6 +241,7 @@ export class GameRoom extends DurableObject<Env> {
       state.players.push(player);
       state.hostPlayerId = player.id;
       state.seatCount = command.payload.seatCount;
+      syncLobbyTeamAssignments(state);
       this.attach(socket, player.id);
       return { playerId: player.id, reconnectToken: token };
     }
@@ -263,6 +264,7 @@ export class GameRoom extends DurableObject<Env> {
       const token = secureToken();
       const player = await humanPlayer(command.payload.name, command.payload.avatarId, seat, token);
       state.players.push(player);
+      syncLobbyTeamAssignments(state);
       this.attach(socket, player.id);
       return { playerId: player.id, reconnectToken: token };
     }
@@ -299,15 +301,22 @@ export class GameRoom extends DurableObject<Env> {
             throw new ProtocolError("INVALID_ACTION", "Move players out of removed seats first.");
           }
           state.seatCount = command.payload.seatCount;
-          for (const player of state.players) {
-            player.teamId = state.seatCount === 4 && player.seat !== null
-              ? (player.seat % 2 === 0 ? "gold" : "green")
-              : null;
-          }
         }
-        const target = command.payload.targetPlayerId ? this.actor(command.payload.targetPlayerId) : null;
-        if (target && command.payload.seat !== undefined) target.seat = command.payload.seat;
-        if (target && command.payload.teamId !== undefined) target.teamId = command.payload.teamId;
+        const target = command.payload.targetPlayerId ? this.seatTarget(command.payload.targetPlayerId) : null;
+        if (target && command.payload.seat !== undefined) {
+          const requestedSeat = command.payload.seat;
+          if (requestedSeat !== null && requestedSeat >= state.seatCount) {
+            throw new ProtocolError("INVALID_ACTION", "Seat is unavailable.");
+          }
+          const priorSeat = target.seat;
+          const displaced = requestedSeat === null
+            ? null
+            : state.players.find((player) => player.id !== target.id && player.seat === requestedSeat) ?? null;
+          target.seat = requestedSeat;
+          if (displaced) displaced.seat = priorSeat;
+        }
+        if (target && command.payload.teamId !== undefined && state.seatCount !== 4) target.teamId = command.payload.teamId;
+        syncLobbyTeamAssignments(state);
         state.settingsVersion += 1;
         return { settingsVersion: state.settingsVersion };
       }
@@ -316,7 +325,8 @@ export class GameRoom extends DurableObject<Env> {
         if (command.payload.seat >= state.seatCount || state.players.some((player) => player.seat === command.payload.seat)) {
           throw new ProtocolError("INVALID_ACTION", "Seat is unavailable.");
         }
-        state.players.push(aiPlayer(command.payload.seat, command.payload.difficulty));
+        state.players.push(aiPlayer(command.payload.seat, command.payload.difficulty, nextAiName(state, command.payload.difficulty)));
+        syncLobbyTeamAssignments(state);
         return {};
       }
       case "REMOVE_AI": {
@@ -324,14 +334,16 @@ export class GameRoom extends DurableObject<Env> {
         const index = state.players.findIndex((player) => player.id === command.payload.playerId && player.isAI);
         if (index < 0) throw new ProtocolError("INVALID_ACTION", "AI player not found.");
         state.players.splice(index, 1);
+        syncLobbyTeamAssignments(state);
         return {};
       }
       case "REPLACE_WITH_AI": {
         this.requireHost(actor);
         const target = this.actor(command.payload.playerId);
         if (target.connected || target.isAI) throw new ProtocolError("INVALID_ACTION", "Only a disconnected human can be replaced.");
-        target.isAI = true; target.aiDifficulty = command.payload.difficulty; target.reconnectTokenHash = null;
+        target.isAI = true; target.aiDifficulty = command.payload.difficulty; target.name = nextAiName(state, command.payload.difficulty); target.avatarId = aiAvatarId(command.payload.difficulty); target.reconnectTokenHash = null;
         target.replacedPermanently = true; target.ready = true;
+        syncLobbyTeamAssignments(state);
         if (state.game.pausedForPlayerId === target.id) state.game.pausedForPlayerId = null;
         runAi(state);
         return {};
@@ -498,6 +510,12 @@ export class GameRoom extends DurableObject<Env> {
     return player;
   }
 
+  private seatTarget(playerId: string): Player {
+    const player = this.state?.players.find((candidate) => candidate.id === playerId);
+    if (!player) throw new ProtocolError("INVALID_ACTION", "Player not found.");
+    return player;
+  }
+
   private requireHost(player: Player): void {
     if (player.id !== this.state?.hostPlayerId) throw new ProtocolError("FORBIDDEN", "Host permission required.");
   }
@@ -556,13 +574,45 @@ async function humanPlayer(name: string, avatarId: string, seat: number, token: 
   };
 }
 
-function aiPlayer(seat: number, difficulty: "easy" | "medium" | "hard"): Player {
+function aiPlayer(seat: number, difficulty: "easy" | "medium" | "hard", name: string): Player {
   return {
-    id: crypto.randomUUID(), name: `AI ${seat + 1}`, avatarId: "g-4", seat,
+    id: crypto.randomUUID(), name, avatarId: aiAvatarId(difficulty), seat,
     teamId: seat % 2 === 0 ? "gold" : "green", connected: true, ready: true,
     isAI: true, aiDifficulty: difficulty, reconnectTokenHash: null,
     replacedPermanently: true, joinedAt: Date.now(),
   };
+}
+
+function nextAiName(state: RoomState, difficulty: "easy" | "medium" | "hard"): string {
+  const base = difficulty === "easy" ? "Mabel" : difficulty === "medium" ? "Arthur" : "Clara";
+  const difficultyLabel = `${difficulty[0]!.toUpperCase() + difficulty.slice(1)}`;
+  const unnumbered = `${base} (${difficultyLabel})`;
+  const sameDifficulty = state.players.filter((player) => player.isAI && player.aiDifficulty === difficulty);
+  if (!sameDifficulty.length) return unnumbered;
+  const numberedPattern = new RegExp(`^${base} (\\d+) \\(${difficultyLabel}\\)$`);
+  const numbers = sameDifficulty
+    .map((player) => {
+      const match = numberedPattern.exec(player.name);
+      return match ? Number(match[1]) : null;
+    })
+    .filter((value): value is number => Number.isFinite(value));
+  const legacy = sameDifficulty.find((player) => player.name === unnumbered);
+  if (legacy && !numbers.length) {
+    legacy.name = `${base} 1 (${difficultyLabel})`;
+    return `${base} 2 (${difficultyLabel})`;
+  }
+  const nextNumber = numbers.length ? Math.max(...numbers) + 1 : sameDifficulty.length + 1;
+  return `${base} ${nextNumber} (${difficultyLabel})`;
+}
+
+function aiAvatarId(difficulty: "easy" | "medium" | "hard"): "g-1" | "g-2" | "g-3" {
+  return difficulty === "easy" ? "g-1" : difficulty === "medium" ? "g-2" : "g-3";
+}
+
+function syncLobbyTeamAssignments(state: RoomState): void {
+  for (const player of state.players) {
+    player.teamId = state.seatCount === 4 && player.seat !== null ? (player.seat % 2 === 0 ? "gold" : "green") : null;
+  }
 }
 
 function secureToken(): string {

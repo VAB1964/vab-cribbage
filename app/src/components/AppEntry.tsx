@@ -34,10 +34,20 @@ function Identity({ value, onConfirm, onBack, compact = false }: { value: Player
   </section>;
 }
 
-type RoomPlayer = { id: string; name: string; avatarId: string; status?: string; seat: number | null; teamId: "gold" | "green" | null; connected: boolean; ready: boolean; isAI: boolean };
+type RoomPlayer = { id: string; name: string; avatarId: string; status?: string; seat: number | null; teamId: "gold" | "green" | null; connected: boolean; ready: boolean; isAI: boolean; aiDifficulty?: "easy" | "medium" | "hard" | null };
 type RoomView = MultiplayerSnapshot & { hostPlayerId: string; seatCount: number; players: RoomPlayer[] };
 const credentialKey = (code: string) => `cribbage.room.${code}.credential.v1`;
 const formatCurrency = (cents: number) => `$${Math.abs(cents / 100).toFixed(2)}`;
+const aiBadgeByDifficulty = {
+  easy: "🦊",
+  medium: "🦉",
+  hard: "🐺",
+} as const;
+const aiLabelByDifficulty = {
+  easy: "AI Easy",
+  medium: "AI Medium",
+  hard: "AI Hard",
+} as const;
 const parseCurrencyToCents = (value: string) => {
   const cleaned = value.replace(/[^0-9.]/g, "");
   if (!cleaned) return null;
@@ -127,6 +137,7 @@ function Lobby({ code, preferences, create, onLeave }: { code: string; preferenc
   };
   const seatCount = view?.seatCount ?? 4;
   const seats = Array.from({ length: seatCount }, (_, seat) => view?.players.find(player => player.seat === seat) ?? null);
+  const assignSeat = (seat: number, targetPlayerId: string) => send("UPDATE_SETUP", { targetPlayerId, seat });
   const playerId = localPlayerId ?? credentialRef.current?.playerId;
   const isHost = Boolean(view && playerId === view.hostPlayerId);
   const phase = String(view?.phase ?? (view?.game && typeof view.game === "object" ? (view.game as { phase?: unknown }).phase : "lobby")).toLowerCase();
@@ -148,6 +159,16 @@ function Lobby({ code, preferences, create, onLeave }: { code: string; preferenc
     return totals;
   }, [ledgerEntries]);
   const money = (cents: number) => `${cents < 0 ? "-" : "+"}${formatCurrency(cents)}`;
+  const aiLabel = (player: RoomPlayer) => {
+    if (!player.isAI) return player.connected ? "Occupied" : "Reconnecting";
+    const difficulty = player.aiDifficulty ?? "medium";
+    return aiLabelByDifficulty[difficulty];
+  };
+  const lobbyOptionLabel = (candidate: RoomPlayer) => {
+    if (!candidate.isAI) return `${candidate.name}${candidate.id === view?.hostPlayerId ? " ♛" : ""}`;
+    const difficulty = candidate.aiDifficulty ?? "medium";
+    return `${aiBadgeByDifficulty[difficulty]} ${aiLabelByDifficulty[difficulty]}${candidate.seat !== null ? ` (Seat ${candidate.seat + 1})` : ""}`;
+  };
   if (view && playerId && !["", "lobby", "waiting", "setup"].includes(phase)) return <MultiplayerTable view={view} playerId={playerId} preferences={preferences} connection={connectionState} message={lastMessage} send={send} onLeave={() => { send("LEAVE_ROOM", {}); onLeave(); }} />;
   return <section className="lobby entry-card">
     <header><div><span className="eyebrow">Private room · {connectionState === "connected" ? "Connected" : connectionState === "reconnecting" ? "Reconnecting…" : "Connecting…"}</span><h2>Waiting room</h2></div><div className="room-code"><small>Room code</small><strong>{code}</strong></div></header>
@@ -156,11 +177,11 @@ function Lobby({ code, preferences, create, onLeave }: { code: string; preferenc
     <div className="seat-grid">{seats.map((player, index) => {
       const avatar = avatarById(player?.avatarId);
       const displayTeam = seatCount === 4
-        ? (player?.teamId === "green" || index % 2 ? "green" : "red")
+        ? (index % 2 === 0 ? "red" : "green")
         : index === 2 ? "blue" : index === 1 ? "green" : "red";
-      return <article className={`lobby-seat team-${displayTeam}`} key={index}><span className="seat-avatar">{avatar ? <img src={avatar.src} alt="" /> : "○"}</span><div><strong>{player?.name ?? "Open seat"}{player?.id === view?.hostPlayerId ? " ♛" : ""}</strong><small>{player ? (player.isAI ? "AI" : player.connected ? "Occupied" : "Reconnecting") : "Open"} · Team {displayTeam[0].toUpperCase() + displayTeam.slice(1)} · {player?.ready ? "Ready" : "Not ready"}</small></div></article>;
+      return <article className={`lobby-seat team-${displayTeam}`} key={index}><span className="seat-avatar">{avatar ? <img src={avatar.src} alt="" /> : "○"}</span><div><strong>{player?.name ?? "Open seat"}{player?.id === view?.hostPlayerId ? " ♛" : ""}</strong><small>{player ? `${aiLabel(player)} · Team ${displayTeam[0].toUpperCase() + displayTeam.slice(1)} · ${player.ready ? "Ready" : "Not ready"}` : "Open · Not ready"}</small>{isHost && view?.players.length ? <label>Seat {index + 1}<select className="lobby-seat-select" value={player?.id ?? ""} onChange={event => { const nextValue = event.target.value; if (!nextValue) { if (player) send("UPDATE_SETUP", { targetPlayerId: player.id, seat: null }); return; } if (nextValue === "__add_ai_easy") { if (!player) send("ADD_AI", { seat: index, difficulty: "easy" }); return; } if (nextValue === "__add_ai_medium") { if (!player) send("ADD_AI", { seat: index, difficulty: "medium" }); return; } if (nextValue === "__add_ai_hard") { if (!player) send("ADD_AI", { seat: index, difficulty: "hard" }); return; } if (nextValue === player?.id) return; assignSeat(index, nextValue); }}><option value="">Open seat</option>{view.players.map(candidate => <option key={candidate.id} value={candidate.id}>{lobbyOptionLabel(candidate)}</option>)}<option value="__add_ai_easy">🦊 AI Easy</option><option value="__add_ai_medium">🦉 AI Medium</option><option value="__add_ai_hard">🐺 AI Hard</option></select></label> : null}</div></article>;
     })}</div>
-    <div className="host-setup"><h3>Host setup</h3><label>Seats<select disabled={!isHost} value={seatCount} onChange={event => send("UPDATE_SETUP", { seatCount: Number(event.target.value) })}><option>2</option><option>3</option><option>4</option></select></label><label>Add AI<select disabled={!isHost} defaultValue="" onChange={event => { const openSeat = seats.findIndex(player => !player); if (openSeat >= 0 && event.target.value) send("ADD_AI", { seat: openSeat, difficulty: event.target.value }); event.target.value = ""; }}><option value="">Choose difficulty</option><option value="medium">Medium</option><option value="easy">Easy</option><option value="hard">Hard</option></select></label><label>Table talk<select defaultValue={preferences.tableTalk}><option>off</option><option>occasional</option><option>chatty</option></select></label><label><input type="checkbox" disabled={!isHost || ledgerLocked} checked={stakeDraft.enabled} onChange={event => { const enabled = event.target.checked; setStakeDraft(current => ({ ...current, enabled })); send("UPDATE_LEDGER", { enabled, baseStakeCents: stakeDraft.baseStakeCents, perHoleCents: stakeDraft.perHoleCents }); }} /> Winner Reward</label>{stakeDraft.enabled && <><label>Game amount (dollars)<input type="text" inputMode="decimal" disabled={!isHost || ledgerLocked} value={gameAmountInput} onChange={event => { const value = event.target.value; setGameAmountInput(value); const parsed = parseCurrencyToCents(value); if (parsed === null) return; setStakeDraft(current => ({ ...current, baseStakeCents: parsed })); send("UPDATE_LEDGER", { enabled: true, baseStakeCents: parsed, perHoleCents: stakeDraft.perHoleCents }); }} onBlur={() => setGameAmountInput(formatCurrency(stakeDraft.baseStakeCents))} /></label><label>Per hole<select disabled={!isHost || ledgerLocked} value={stakeDraft.perHoleCents} onChange={event => { const value = Number(event.target.value) as 5 | 10 | 15 | 20; setStakeDraft(current => ({ ...current, perHoleCents: value })); send("UPDATE_LEDGER", { enabled: true, baseStakeCents: stakeDraft.baseStakeCents, perHoleCents: value }); }}><option>5</option><option>10</option><option>15</option><option>20</option></select> cents</label></>}</div>
+    <div className="host-setup"><h3>Host setup</h3><label>Seats<select disabled={!isHost} value={seatCount} onChange={event => send("UPDATE_SETUP", { seatCount: Number(event.target.value) })}><option>2</option><option>3</option><option>4</option></select></label><label>Table talk<select defaultValue={preferences.tableTalk}><option>off</option><option>occasional</option><option>chatty</option></select></label><label><input type="checkbox" disabled={!isHost || ledgerLocked} checked={stakeDraft.enabled} onChange={event => { const enabled = event.target.checked; setStakeDraft(current => ({ ...current, enabled })); send("UPDATE_LEDGER", { enabled, baseStakeCents: stakeDraft.baseStakeCents, perHoleCents: stakeDraft.perHoleCents }); }} /> Winner Reward</label>{stakeDraft.enabled && <><label>Game amount (dollars)<input type="text" inputMode="decimal" disabled={!isHost || ledgerLocked} value={gameAmountInput} onChange={event => { const value = event.target.value; setGameAmountInput(value); const parsed = parseCurrencyToCents(value); if (parsed === null) return; setStakeDraft(current => ({ ...current, baseStakeCents: parsed })); send("UPDATE_LEDGER", { enabled: true, baseStakeCents: parsed, perHoleCents: stakeDraft.perHoleCents }); }} onBlur={() => setGameAmountInput(formatCurrency(stakeDraft.baseStakeCents))} /></label><label>Per hole<select disabled={!isHost || ledgerLocked} value={stakeDraft.perHoleCents} onChange={event => { const value = Number(event.target.value) as 5 | 10 | 15 | 20; setStakeDraft(current => ({ ...current, perHoleCents: value })); send("UPDATE_LEDGER", { enabled: true, baseStakeCents: stakeDraft.baseStakeCents, perHoleCents: value }); }}><option>5</option><option>10</option><option>15</option><option>20</option></select> cents</label></>}</div>
     <p className="ledger-note">Winner reward: {ledgerEntries.length} game{ledgerEntries.length === 1 ? "" : "s"} recorded{ledgerLocked ? " (locked for this session)" : ""} · friendly recordkeeping only; no payments are processed.{ledgerEntries.length > 0 ? ` ${view?.players.map(player => `${player.name} ${money(ledgerTotals[player.id] ?? 0)}`).join(" · ")}` : ""}</p>
     <div className="entry-actions"><button className="quiet" onClick={() => { send("LEAVE_ROOM", {}); onLeave(); }}>Leave room</button><button onClick={() => { configureGameAudio(preferences.soundEnabled, preferences.volume); unlockGameAudio(); send("SET_READY", { ready: !ready }); }}>{ready ? "Not ready" : "Ready"}</button>{isHost && <button className="primary" disabled={!ready || seats.some(player => !player)} onClick={() => { configureGameAudio(preferences.soundEnabled, preferences.volume); unlockGameAudio(); send("START_GAME", {}); }}>Start game</button>}</div>
   </section>;

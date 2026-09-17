@@ -10,7 +10,7 @@ import type { CommandType, ConnectionState } from "../multiplayer/protocol";
 
 type Player = {
   id: string; name: string; avatarId?: string; seat: number | null; teamId?: string | null;
-  connected?: boolean; isAI?: boolean; ready?: boolean; score?: number; hand?: Card[]; handCount?: number;
+  connected?: boolean; isAI?: boolean; aiDifficulty?: "easy" | "medium" | "hard" | null; ready?: boolean; score?: number; hand?: Card[]; handCount?: number;
 };
 type Event = { id?: string; type: string; data: Record<string, unknown> };
 type PegColor = "red" | "green" | "blue";
@@ -55,6 +55,7 @@ function AvatarMark({ id, fallback = "●" }: { id?: string; fallback?: string }
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const number = (value: unknown, fallback = 0) => typeof value === "number" && Number.isFinite(value) ? value : fallback;
 const text = (value: unknown, fallback = "") => typeof value === "string" ? value : fallback;
+const aiDifficultyText = (value: unknown) => value === "easy" || value === "medium" || value === "hard" ? value : null;
 const parseCard = (value: unknown): Card | null => {
   if (isCard(value)) return value;
   if (typeof value !== "string") return null;
@@ -80,7 +81,7 @@ const playersFrom = (view: MultiplayerSnapshot): Player[] => {
     if (!item || typeof item.id !== "string") return [];
     const hand = cards(item.hand ?? item.cards);
     return [{ id: item.id, name: text(item.name, "Player"), avatarId: text(item.avatarId), seat: typeof item.seat === "number" ? item.seat : null,
-      teamId: typeof item.teamId === "string" ? item.teamId : null, connected: item.connected !== false, isAI: item.isAI === true,
+      teamId: typeof item.teamId === "string" ? item.teamId : null, connected: item.connected !== false, isAI: item.isAI === true, aiDifficulty: aiDifficultyText(item.aiDifficulty),
       ready: item.ready === true, score: number(item.score), hand, handCount: number(item.handCount ?? item.cardCount, hand.length) }];
   });
 };
@@ -114,13 +115,13 @@ function CardNotation({ value }: { value: string }) {
 }
 
 function CribbageBoard({ lanes, moves }: {
-  lanes: Array<{ id: string; label: string; score: number; color: PegColor }>;
+  lanes: Array<{ id: string; label: string; sublabel?: string; score: number; color: PegColor }>;
   moves: Record<string, { from: number; to: number; amount: number }>;
 }) {
   const winner = lanes.find(lane => lane.score >= 121);
   return <section className="mp-cribbage-board" aria-label="Cribbage scoreboard">
-    {lanes.map(lane => <div className={`mp-board-lane ${lane.color}`} key={lane.id} aria-label={`${lane.label}: ${lane.score} points`}>
-      <strong>{lane.label}</strong>
+    {lanes.map(lane => <div className={`mp-board-lane ${lane.color}`} key={lane.id} aria-label={`${lane.label}${lane.sublabel ? `, ${lane.sublabel}` : ""}: ${lane.score} points`}>
+      <strong><span>{lane.label}</span>{lane.sublabel ? <small>{lane.sublabel}</small> : null}</strong>
       <i className={`mp-end-hole ${lane.score === 0 ? `pegged ${lane.color}` : ""} ${moves[lane.id]?.from === 0 ? "has-ghost" : ""}`} aria-label="Start hole"><span /></i>
       <div className="mp-hole-track" aria-hidden="true">{Array.from({ length: 24 }, (_, groupIndex) => {
         const groupEnd = (groupIndex + 1) * 5;
@@ -187,6 +188,7 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
   const [hiddenHandSlotByPlayer, setHiddenHandSlotByPlayer] = useState<Record<string, number>>({});
   const [pendingScoreOverlayByLane, setPendingScoreOverlayByLane] = useState<Record<string, number>>({});
   const pileTargetRef = useRef<HTMLDivElement>(null);
+  const pileInsertRef = useRef<HTMLSpanElement>(null);
   const seen = useRef(new Set<string>());
   const discoveredPegNoticeIdsRef = useRef(new Set<string>());
   const completedPegNoticeIdsRef = useRef(new Set<string>());
@@ -323,15 +325,27 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
   function requestCardPlayAnimation(presentation: PegPresentation) {
     if (!presentation.card) return false;
     const playerRoot = document.querySelector<HTMLElement>(`[data-mp-player="${presentation.playerId}"]`);
-    const source = playerRoot?.querySelector<HTMLElement>(".mp-hidden-hand, .mp-local-hand") ?? playerRoot;
-    const target = pileTargetRef.current;
+    const sourceCandidates = [
+      playerRoot?.querySelector<HTMLElement>(".mp-hidden-hand"),
+      playerRoot?.querySelector<HTMLElement>(".mp-local-hand"),
+      playerRoot?.querySelector<HTMLElement>(".mp-avatar"),
+      playerRoot,
+    ].filter((candidate): candidate is HTMLElement => Boolean(candidate));
+    const source = sourceCandidates.find((candidate) => {
+      const rect = candidate.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }) ?? null;
+    const target = pileInsertRef.current ?? pileTargetRef.current;
     if (!source || !target) return false;
+    const compact = window.matchMedia("(max-width: 720px)").matches;
+    const cardWidth = compact ? 30 : 56;
+    const cardHeight = compact ? 42 : 80;
     const sourceRect = source.getBoundingClientRect();
     const targetRect = target.getBoundingClientRect();
-    const left = sourceRect.left + sourceRect.width / 2 - 28;
-    const top = sourceRect.top + sourceRect.height / 2 - 40;
-    const destinationLeft = targetRect.left + visiblePile.length * 36;
-    const destinationTop = targetRect.top + 7;
+    const left = sourceRect.left + sourceRect.width / 2 - cardWidth / 2;
+    const top = sourceRect.top + sourceRect.height / 2 - cardHeight / 2;
+    const destinationLeft = targetRect.left + targetRect.width / 2 - cardWidth / 2;
+    const destinationTop = targetRect.top + targetRect.height / 2 - cardHeight / 2;
     setPendingPlayAnimation({
       presentationId: presentation.presentationId,
       playerId: presentation.playerId,
@@ -639,12 +653,16 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
     : null;
   const cribCount = number(state.cribCount);
   const scoreLanes = players.length === 4
-    ? (["gold", "green"] as const).map(teamId => ({
-      id: teamId,
-      label: `${teamId === "gold" ? "Red" : "Green"} · ${players.filter(player => player.teamId === teamId).map(player => player.name).join(" & ")}`,
-      score: displayedScoreForLane(teamId),
-      color: teamId === "gold" ? "red" as const : "green" as const,
-    }))
+    ? (["gold", "green"] as const).map(teamId => {
+      const members = players.filter(player => player.teamId === teamId).map(player => player.name);
+      return {
+        id: teamId,
+        label: `${teamId === "gold" ? "Red" : "Green"} · ${members[0] ?? "Open"}`,
+        sublabel: members[1] ?? "",
+        score: displayedScoreForLane(teamId),
+        color: teamId === "gold" ? "red" as const : "green" as const,
+      };
+    })
     : players.map((player, index) => ({ id: player.id, label: player.name, score: displayedScoreForLane(player.id), color: (index === 2 ? "blue" : index === 1 ? "green" : "red") as PegColor }));
   const [scoreMoves, setScoreMoves] = useState<Record<string, { from: number; to: number; amount: number }>>({});
   const previousLaneScores = useRef<Record<string, number>>(Object.fromEntries(scoreLanes.map(lane => [lane.id, lane.score])));
@@ -779,7 +797,7 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
 
   return <main className="mp-table" onClickCapture={onButtonClickCapture}>
     <header className="mp-board">
-      <div><span className="eyebrow">Private table · {titlePhase(phase)}</span><h1>Cribbage</h1></div>
+      <div><h1>Cribbage</h1></div>
       <div className="mp-game-actions"><div className={`mp-connection ${connection}`}>{connection === "connected" ? "Live" : "Reconnecting…"}</div><button className="quiet" onClick={() => setShowHistory(true)}>History</button><button className="quiet" onClick={onLeave}>Leave table</button></div>
       <CribbageBoard lanes={scoreLanes} moves={scoreMoves} />
     </header>
@@ -793,20 +811,27 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
         <PlayingCard card={flyingCard.card} disabled />
       </div>
     </div>}
+    {((phase === "cut" && cutCards) || (showCutResult && cutCards && Object.keys(cutCards).length > 0)) && <div className="mp-cut-modal" role="dialog" aria-modal="true" aria-labelledby="mp-cut-title">
+      <section className={`mp-cut-reveal ${showCutResult ? "complete" : ""}`}>
+        <strong id="mp-cut-title">{showCutResult ? `${dealerPlayer?.name ?? "Low card"} cut low and deals` : "Cut for deal"}</strong>
+        <div>{players.map(player => {
+          const card = parseCard(cutCards[player.id]);
+          return <article className={showCutResult && player.seat === dealerSeat ? "dealer-cut" : ""} key={player.id}><span>{player.name}{showCutResult && player.seat === dealerSeat ? " · Dealer" : ""}</span>{card ? <PlayingCard card={card} disabled /> : <span className="mp-card back" />}</article>;
+        })}</div>
+        {phase === "cut" && !object(state.cutCards)?.[playerId] && <button className="primary" onClick={() => { unlockGameAudio(); playGameSound("shuffle"); send("CUT_CARD", {}); }}>Cut card</button>}
+      </section>
+    </div>}
+
     <section className="mp-tabletop" style={{ gridTemplateColumns: `repeat(${players.length},minmax(0,1fr))` }}>
       <div className="mp-center">
-        {(phase === "cut" || showCutResult) && cutCards && Object.keys(cutCards).length > 0 && <div className={`mp-cut-reveal ${showCutResult ? "complete" : ""}`}>
-          <strong>{showCutResult ? `${dealerPlayer?.name ?? "Low card"} cut low and deals` : "Low card deals"}</strong>
-          <div>{players.map(player => {
-            const card = parseCard(cutCards[player.id]);
-            return <article className={showCutResult && player.seat === dealerSeat ? "dealer-cut" : ""} key={player.id}><span>{player.name}{showCutResult && player.seat === dealerSeat ? " · Dealer" : ""}</span>{card ? <PlayingCard card={card} disabled /> : <span className="mp-card back" />}</article>;
-          })}</div>
-        </div>}
-        <div><small>Running count</small><strong className="mp-count">{displayRunningCount}</strong></div>
-        <div><small>Played</small><div className="mp-pile" ref={pileTargetRef}>{visiblePile.map(card => <PlayingCard card={card} key={card.id} disabled />)}</div></div>
-        <div><small>Starter</small>{cut ? <PlayingCard card={cut} disabled /> : <span className="mp-card-slot" />}</div>
+        <div className="mp-count-starter">
+          <small>Running count</small>
+          <strong className="mp-count">{displayRunningCount}</strong>
+          <small>Starter</small>
+          {cut ? <PlayingCard card={cut} disabled /> : <span className="mp-card-slot" />}
+        </div>
+        <div><small>Played</small><div className="mp-pile" ref={pileTargetRef}>{visiblePile.map(card => <PlayingCard card={card} key={card.id} disabled />)}<span className="mp-pile-anchor" ref={pileInsertRef} aria-hidden="true" /></div></div>
         <div className="mp-prompt"><strong>{turnMessage}</strong>
-          {phase === "cut" && !object(state.cutCards)?.[playerId] && <button className="primary" onClick={() => { unlockGameAudio(); playGameSound("shuffle"); send("CUT_CARD", {}); }}>Cut card</button>}
           {phase === "discard" && !hasDiscarded && <button className="primary" disabled={selected.length !== needed} onClick={() => send("DISCARD", { cards: selected.map(id => encodeCard(hand.find(card => card.id === id)!)) })}>Send exactly {needed}</button>}
           {phase === "pegging" && myTurn && selected.length === 1 && <button className="primary" disabled={!legalIds.has(selected[0]) || pendingPegPresentation} onClick={() => send("PLAY_CARD", { card: encodeCard(hand.find(card => card.id === selected[0])!) })}>Play card</button>}
           {canGo && <button className="primary" onClick={() => send("SAY_GO", {})}>Say Go</button>}
@@ -819,7 +844,7 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
         <span className="mp-avatar"><AvatarMark id={me?.avatarId} /></span>
         <div><strong>{me?.name ?? "You"}{me?.seat === dealerSeat ? " · Dealer" : ""}</strong><small>{myTurn ? "Your turn" : "Your hand"}</small></div>
         <div className="mp-local-hand">{hand.map(card => <PlayingCard card={card} key={card.id} selected={selected.includes(card.id)} disabled={phase !== "discard" && !(phase === "pegging" && myTurn && legalIds.has(card.id) && !pendingPegPresentation)} onClick={() => toggle(card.id)} />)}</div>
-        {me?.seat === dealerSeat && cribCount > 0 && <div className="mp-crib-strip"><strong>Your crib</strong><div>{Array.from({ length: cribCount }, (_, index) => <PlayingCard hidden key={index} />)}</div></div>}
+        {me?.seat === dealerSeat && cribCount > 0 && <div className="mp-crib-strip"><strong>Crib</strong><div>{Array.from({ length: cribCount }, (_, index) => <PlayingCard hidden key={index} />)}</div></div>}
       </article>
       <div className="mp-opponents">{opponentsInTurnOrder.map(player => <article data-mp-player={player.id} key={player.id} className={`mp-player ${player.seat === turnSeat ? "active" : ""}`}>
         {activeNotice?.playerId === player.id && <div className="mp-player-notice" role="status" aria-live="polite">{noticeContent}</div>}
@@ -831,7 +856,7 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
           const hideSlot = hiddenSlots > 0 && index >= slotCount - hiddenSlots;
           return <span key={index} style={hideSlot ? { visibility: "hidden" } : undefined}><PlayingCard hidden /></span>;
         })}</div>
-        {player.seat === dealerSeat && cribCount > 0 && <div className="mp-crib-strip"><strong>{player.name}'s crib</strong><div>{Array.from({ length: cribCount }, (_, index) => <PlayingCard hidden key={index} />)}</div></div>}
+        {player.seat === dealerSeat && cribCount > 0 && <div className="mp-crib-strip"><strong>Crib</strong><div>{Array.from({ length: cribCount }, (_, index) => <PlayingCard hidden key={index} />)}</div></div>}
       </article>)}</div>
 
     </section>
