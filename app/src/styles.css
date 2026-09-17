@@ -220,6 +220,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible { 
 .mp-cut-reveal.complete { background:#0d3527; }
 .mp-tabletop { display:grid; max-width:1600px; min-height:46vh; margin:auto; overflow:hidden; border:7px ridge #8a542c; border-radius:0 0 28px 28px; background:radial-gradient(circle,#0b543c,#063421 75%); box-shadow:0 18px 50px #000c,inset 0 0 0 2px #d49a4d; }
 .mp-opponents { display:contents; }.mp-player { position:relative; display:grid; grid-template-columns:auto 1fr; gap:6px 10px; min-width:0; min-height:210px; padding:10px 12px; border:1px solid #b78643; background:#062e21cc; }.mp-player.active { outline:3px solid var(--gold); outline-offset:-3px; background:#164d36; box-shadow:inset 0 0 28px #f4ca5555; }.mp-player small { display:block; margin-top:3px; color:#bdc9be; font:12px Arial,sans-serif; }
+.mp-cards-left { display:none; }
 .mp-player-notice { pointer-events:none; position:absolute; z-index:12; top:8px; left:50%; display:grid; justify-items:center; width:min(270px,calc(100% - 24px)); padding:8px 12px; transform:translateX(-50%); border:3px ridge #d5ae6e; border-radius:9px; color:#fff8df; background:#251407f5; box-shadow:0 7px 22px #000b; text-align:center; animation:mp-player-notice 2.6s ease both; }.mp-player-notice strong { color:#ffe09a; font-size:15px; }.mp-player-notice span { margin-top:3px; font:700 12px Arial,sans-serif; }.mp-player-notice small { margin-top:3px; color:#d8c8a7; font:700 10px Arial,sans-serif; }.mp-player-notice .mp-card-notation { display:inline; color:#f5f1e6; }.mp-player-notice .mp-card-notation.warm { color:#ff6068; }
 @keyframes mp-player-notice { 0% { opacity:0; transform:translate(-50%,-6px) scale(.94); } 12%,82% { opacity:1; transform:translate(-50%,0) scale(1); } 100% { opacity:0; transform:translate(-50%,3px) scale(.98); } }
 .mp-avatar { display:grid; place-items:center; width:42px; height:42px; overflow:hidden; border:2px solid var(--gold); border-radius:50%; background:#315c48; font-size:22px; color:#f6dfaa; }.mp-avatar img { width:100%; height:100%; object-fit:cover; }.mp-hidden-hand { grid-column:1/-1; display:flex; justify-content:center; height:50px; overflow:hidden; }.mp-hidden-hand .mp-card { margin-right:-34px; transform:scale(.62); transform-origin:top; }
@@ -279,6 +280,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible { 
   .mp-flying-card .mp-card span { font-size:14px; line-height:1; }
   .mp-flying-card .mp-card b { font-size:11px; line-height:1; }
   .mp-player-notice { z-index:30; width:max-content; max-width:min(270px,calc(100vw - 20px)); white-space:normal; }
+  .mp-cards-left { display:block; margin-top:1px; color:#e9d7ad; font-size:10px; }
   .mp-opponents .mp-player:first-child .mp-player-notice { left:6px; transform:none; }
   .mp-opponents .mp-player:last-child .mp-player-notice { left:auto; right:6px; transform:none; }
 }
@@ -314,6 +316,7 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible { 
   .mp-flying-card .mp-card span { font-size:15px; line-height:1; }
   .mp-flying-card .mp-card b { font-size:12px; line-height:1; }
   .mp-player-notice { z-index:30; width:max-content; max-width:min(300px,calc(100vw - 28px)); white-space:normal; }
+  .mp-cards-left { display:block; margin-top:1px; color:#e9d7ad; font-size:10px; }
   .mp-opponents .mp-player:first-child .mp-player-notice { left:8px; transform:none; }
   .mp-opponents .mp-player:last-child .mp-player-notice { left:auto; right:8px; transform:none; }
 }

@@ -842,14 +842,14 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
       <article data-mp-player={playerId} className={`mp-player local ${myTurn ? "active" : ""}`}>
         {activeNotice?.playerId === playerId && <div className="mp-player-notice" role="status" aria-live="polite">{noticeContent}</div>}
         <span className="mp-avatar"><AvatarMark id={me?.avatarId} /></span>
-        <div><strong>{me?.name ?? "You"}{me?.seat === dealerSeat ? " · Dealer" : ""}</strong><small>{myTurn ? "Your turn" : "Your hand"}</small></div>
+        <div><strong>{me?.name ?? "You"}{me?.seat === dealerSeat ? " · Dealer" : ""}</strong><small>{myTurn ? "Your turn" : "Your hand"}<span className="mp-cards-left">Cards left: {displayedHandCount(playerId)}</span></small></div>
         <div className="mp-local-hand">{hand.map(card => <PlayingCard card={card} key={card.id} selected={selected.includes(card.id)} disabled={phase !== "discard" && !(phase === "pegging" && myTurn && legalIds.has(card.id) && !pendingPegPresentation)} onClick={() => toggle(card.id)} />)}</div>
         {me?.seat === dealerSeat && cribCount > 0 && <div className="mp-crib-strip"><strong>Crib</strong><div>{Array.from({ length: cribCount }, (_, index) => <PlayingCard hidden key={index} />)}</div></div>}
       </article>
       <div className="mp-opponents">{opponentsInTurnOrder.map(player => <article data-mp-player={player.id} key={player.id} className={`mp-player ${player.seat === turnSeat ? "active" : ""}`}>
         {activeNotice?.playerId === player.id && <div className="mp-player-notice" role="status" aria-live="polite">{noticeContent}</div>}
         <span className="mp-avatar"><AvatarMark id={player.avatarId} /></span>
-        <div><strong>{player.name}{player.seat === dealerSeat ? " · Dealer" : ""}</strong><small>{player.connected === false ? "Disconnected" : player.isAI ? "Computer" : player.seat === turnSeat ? "Playing" : "Waiting"}</small></div>
+        <div><strong>{player.name}{player.seat === dealerSeat ? " · Dealer" : ""}</strong><small>{player.connected === false ? "Disconnected" : player.isAI ? "Computer" : player.seat === turnSeat ? "Playing" : "Waiting"}<span className="mp-cards-left">Cards left: {displayedHandCount(player.id)}</span></small></div>
         <div className="mp-hidden-hand">{Array.from({ length: displayedHandCount(player.id) }, (_, index) => {
           const slotCount = displayedHandCount(player.id);
           const hiddenSlots = hiddenHandSlots(player.id);
