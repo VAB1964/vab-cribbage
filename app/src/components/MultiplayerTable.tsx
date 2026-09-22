@@ -114,43 +114,51 @@ function CardNotation({ value }: { value: string }) {
   return <>{parts}</>;
 }
 
-function CribbageBoard({ lanes, moves }: {
+function CribbageBoard({ lanes, moves, previews = {} }: {
   lanes: Array<{ id: string; label: string; sublabel?: string; score: number; color: PegColor }>;
   moves: Record<string, { from: number; to: number; amount: number }>;
+  previews?: Record<string, { from: number; to: number; amount: number }>;
 }) {
   const winner = lanes.find(lane => lane.score >= 121);
+  const previewWinner = lanes.find(lane => previews[lane.id]?.to >= 121);
   return <section className="mp-cribbage-board" aria-label="Cribbage scoreboard">
-    {lanes.map(lane => <div className={`mp-board-lane ${lane.color}`} key={lane.id} aria-label={`${lane.label}${lane.sublabel ? `, ${lane.sublabel}` : ""}: ${lane.score} points`}>
-      <strong><span>{lane.label}</span>{lane.sublabel ? <small>{lane.sublabel}</small> : null}</strong>
-      <i className={`mp-end-hole ${lane.score === 0 ? `pegged ${lane.color}` : ""} ${moves[lane.id]?.from === 0 ? "has-ghost" : ""}`} aria-label="Start hole"><span /></i>
-      <div className="mp-hole-track" aria-hidden="true">{Array.from({ length: 24 }, (_, groupIndex) => {
-        const groupEnd = (groupIndex + 1) * 5;
-        return <div className={`mp-hole-group ${groupEnd === 60 ? "double-skunk-line" : ""} ${groupEnd === 90 ? "skunk-line" : ""}`} key={groupIndex}>
-          {Array.from({ length: 5 }, (_, offset) => {
-            const hole = groupIndex * 5 + offset + 1;
-            const move = moves[lane.id];
-            const alreadyPegged = hole < Math.min(121, lane.score);
-            const inTrail = Boolean(move && hole > move.from && hole <= move.to);
-            return <i key={hole} className={`${alreadyPegged ? "already-pegged" : ""} ${hole === lane.score ? `pegged ${lane.color}` : ""} ${inTrail ? `score-trail ${lane.color}` : ""} ${move?.from === hole ? "has-ghost" : ""}`}>
-              <span />{hole === lane.score && move?.amount ? <b className="mp-score-jump">+{move.amount}</b> : null}
-            </i>;
-          })}
-        </div>;
-      })}</div>
-      <b>{lane.score}</b>
-    </div>)}
-    <div className={`mp-finish ${winner?.color ?? ""}`}><small>Finish</small><i className={`mp-end-hole ${winner ? `pegged ${winner.color}` : ""}`}><span /></i></div>
+    {lanes.map(lane => {
+      const preview = previews[lane.id];
+      return <div className={`mp-board-lane ${lane.color}`} key={lane.id} aria-label={`${lane.label}${lane.sublabel ? `, ${lane.sublabel}` : ""}: ${lane.score} points${preview ? `, ${preview.amount} points pending` : ""}`}>
+        <strong><span>{lane.label}</span>{lane.sublabel ? <small>{lane.sublabel}</small> : null}</strong>
+        <i className={`mp-end-hole ${lane.score === 0 ? `pegged ${lane.color}` : ""} ${moves[lane.id]?.from === 0 ? "has-ghost" : ""}`} aria-label="Start hole"><span /></i>
+        <div className="mp-hole-track" aria-hidden="true">{Array.from({ length: 24 }, (_, groupIndex) => {
+          const groupEnd = (groupIndex + 1) * 5;
+          return <div className={`mp-hole-group ${groupEnd === 60 ? "double-skunk-line" : ""} ${groupEnd === 90 ? "skunk-line" : ""}`} key={groupIndex}>
+            {Array.from({ length: 5 }, (_, offset) => {
+              const hole = groupIndex * 5 + offset + 1;
+              const move = moves[lane.id];
+              const alreadyPegged = hole < Math.min(121, lane.score);
+              const inTrail = Boolean(move && hole > move.from && hole <= move.to);
+              const inPreviewTrail = Boolean(preview && hole > preview.from && hole <= preview.to);
+              return <i key={hole} className={`${alreadyPegged ? "already-pegged" : ""} ${hole === lane.score ? `pegged ${lane.color}` : ""} ${inTrail ? `score-trail ${lane.color}` : ""} ${move?.from === hole ? "has-ghost" : ""} ${inPreviewTrail ? "score-preview-trail" : ""} ${preview?.to === hole ? "preview-peg" : ""}`}>
+                <span />{hole === lane.score && move?.amount ? <b className="mp-score-jump">+{move.amount}</b> : null}
+              </i>;
+            })}
+          </div>;
+        })}</div>
+        <b>{lane.score}{preview ? <small className="mp-score-preview">+{preview.amount}</small> : null}</b>
+      </div>;
+    })}
+    <div className={`mp-finish ${winner?.color ?? previewWinner?.color ?? ""}`}><small>Finish</small><i className={`mp-end-hole ${winner ? `pegged ${winner.color}` : ""} ${!winner && previewWinner ? "preview-peg" : ""}`}><span /></i></div>
   </section>;
 }
 
-function CountReveal({ title, hand, starter, isCrib, points, canContinue, waiting, onContinue }: {
+function CountReveal({ title, hand, starter, isCrib, points, canContinue, waiting, confirmed = false, players, acknowledgements, onContinue }: {
   title: string; hand: Card[]; starter?: Card; isCrib: boolean; points: number;
-  canContinue: boolean; waiting: boolean; onContinue: () => void;
+  canContinue: boolean; waiting: boolean; confirmed?: boolean; players: Player[]; acknowledgements: string[]; onContinue: () => void;
 }) {
   const score = hand.length === 4 && starter ? scoreHand(hand, starter, isCrib) : null;
+  const reviewers = players.filter(player => !player.isAI);
+  const accepted = new Set(acknowledgements);
   const describe = (event: NonNullable<typeof score>["events"][number]) =>
     `${event.category === "fifteen" ? "Fifteen" : event.category[0].toUpperCase() + event.category.slice(1)}: ${event.cards.map(card => `${rank(card.rank)}${suit(card.suit)}`).join(" + ")} — ${event.points}`;
-  return <div className="mp-count-modal" role="dialog" aria-modal="true" aria-labelledby="mp-count-title">
+  return <div className="mp-count-modal" role="region" aria-labelledby="mp-count-title">
     <section>
       <span className="eyebrow">{isCrib ? "Crib count" : "Hand count"}</span>
       <h2 id="mp-count-title">{title}</h2>
@@ -161,8 +169,14 @@ function CountReveal({ title, hand, starter, isCrib, points, canContinue, waitin
         <h3>{points} points</h3>
         {score?.events.length ? <ul>{score.events.map((event, index) => <li key={`${event.category}-${index}`}>{describe(event)}</li>)}</ul> : <p>No scoring combinations.</p>}
       </div>
-      <button className="primary" disabled={!canContinue || waiting} onClick={onContinue}>
-        {waiting ? "Waiting for other players…" : canContinue ? "Accept count" : "Reviewing count…"}
+      <div className="mp-count-approvals" aria-live="polite">
+        <strong>{confirmed ? `Count confirmed — pegging ${points}` : `${accepted.size} of ${reviewers.length} players accepted`}</strong>
+        <div>{reviewers.map(reviewer => <span className={accepted.has(reviewer.id) ? "accepted" : ""} key={reviewer.id}>
+          <i aria-hidden="true">{accepted.has(reviewer.id) ? "✓" : "…"}</i>{reviewer.name}
+        </span>)}</div>
+      </div>
+      <button className="primary" disabled={confirmed || !canContinue || waiting} onClick={onContinue}>
+        {confirmed ? `Pegging ${points} points…` : waiting ? "Waiting for other players…" : canContinue ? "Accept count" : "Reviewing count…"}
       </button>
     </section>
   </div>;
@@ -679,7 +693,8 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
     return () => window.clearTimeout(timer);
   }, [view.revision]);
   const currentCount = object(state.currentCount);
-  const alreadyAcknowledged = Array.isArray(state.acknowledgements) && state.acknowledgements.includes(playerId);
+  const acknowledgements = Array.isArray(state.acknowledgements) ? state.acknowledgements.filter((id): id is string => typeof id === "string") : [];
+  const alreadyAcknowledged = acknowledgements.includes(playerId);
   const countedPlayer = players.find(player => player.id === currentCount?.playerId);
   const [aiReviewReady, setAiReviewReady] = useState(true);
   useEffect(() => {
@@ -692,7 +707,11 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
   const countStarter = parseCard(currentCount?.starterCard);
   const [countRevealReady, setCountRevealReady] = useState(true);
   const [countPegging, setCountPegging] = useState<{ name: string; points: number; score: number; color: PegColor } | null>(null);
-  const previousCountForPeg = useRef<{ eventId: string; name: string; teamId: string; points: number; color: PegColor } | null>(null);
+  type CountPresentation = { eventId: string; name: string; teamId: string; points: number; color: PegColor; hand: Card[]; starter: Card; isCrib: boolean };
+  const previousCountForPeg = useRef<CountPresentation | null>(null);
+  const [settlingCount, setSettlingCount] = useState<CountPresentation | null>(null);
+  const countEventTransitioning = Boolean(previousCountForPeg.current
+    && text(currentCount?.eventId) !== previousCountForPeg.current.eventId);
   const playerPegColor = (targetId: unknown): PegColor => {
     const index = players.findIndex(player => player.id === targetId);
     if (players.length === 4) return players[index]?.teamId === "green" ? "green" : "red";
@@ -746,6 +765,7 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
     const previous = previousCountForPeg.current;
     if (previous && eventId !== previous.eventId) {
       setCountRevealReady(false);
+      setSettlingCount(previous);
       setCountPegging({
         name: previous.name,
         points: previous.points,
@@ -755,6 +775,7 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
       playGameSound("peg");
       const timer = window.setTimeout(() => {
         setCountPegging(null);
+        setSettlingCount(null);
         setCountRevealReady(true);
         if (eventId) playGameSound("count");
       }, 2400);
@@ -764,6 +785,9 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
         teamId: text(currentCount?.teamId),
         points: number(currentCount?.points),
         color: playerPegColor(currentCount?.playerId),
+        hand: countedCards,
+        starter: countStarter as Card,
+        isCrib: currentCount?.kind === "crib",
       } : null;
       return () => window.clearTimeout(timer);
     }
@@ -774,6 +798,9 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
         teamId: text(currentCount?.teamId),
         points: number(currentCount?.points),
         color: playerPegColor(currentCount?.playerId),
+        hand: countedCards,
+        starter: countStarter as Card,
+        isCrib: currentCount?.kind === "crib",
       };
       setCountRevealReady(true);
     }
@@ -795,11 +822,21 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
     playGameSound("click");
   };
 
-  return <main className="mp-table" onClickCapture={onButtonClickCapture}>
+  const countPreviews: Record<string, { from: number; to: number; amount: number }> = {};
+  if (phase === "counting" && countRevealReady && !countEventTransitioning && currentCount) {
+    const laneId = text(currentCount.teamId);
+    const amount = number(currentCount.points);
+    if (laneId && amount > 0) {
+      const from = displayedScoreForLane(laneId);
+      countPreviews[laneId] = { from, to: Math.min(121, from + amount), amount };
+    }
+  }
+
+  return <main className={`mp-table phase-${phase}`} onClickCapture={onButtonClickCapture}>
     <header className="mp-board">
       <div><h1>Cribbage</h1></div>
       <div className="mp-game-actions"><div className={`mp-connection ${connection}`}>{connection === "connected" ? "Live" : "Reconnecting…"}</div><button className="quiet" onClick={() => setShowHistory(true)}>History</button><button className="quiet" onClick={onLeave}>Leave table</button></div>
-      <CribbageBoard lanes={scoreLanes} moves={scoreMoves} />
+      <CribbageBoard lanes={scoreLanes} moves={scoreMoves} previews={countPreviews} />
     </header>
     {countPegging && <div className={`mp-count-pegging ${countPegging.color}`} role="status" aria-live="assertive">
       <strong>{countPegging.name} pegs {countPegging.points}</strong>
@@ -900,10 +937,16 @@ export default function MultiplayerTable({ view, playerId, preferences, connecti
       <button onClick={() => send("REPLACE_WITH_AI", { playerId: state.pausedForPlayerId, difficulty: "medium" })}>Replace with AI</button>
       <button onClick={() => send("END_GAME", {})}>End game</button>
     </div>}
-    {phase === "counting" && countingEntryReady && countRevealReady && currentCount && countStarter && <CountReveal
+    {settlingCount && <CountReveal
+      title={settlingCount.isCrib ? settlingCount.name : `${settlingCount.name}'s hand`}
+      hand={settlingCount.hand} starter={settlingCount.starter} isCrib={settlingCount.isCrib} points={settlingCount.points}
+      canContinue={false} waiting confirmed players={players} acknowledgements={players.filter(player => !player.isAI).map(player => player.id)}
+      onContinue={() => undefined}
+    />}
+    {phase === "counting" && countingEntryReady && countRevealReady && !countEventTransitioning && currentCount && countStarter && <CountReveal
       title={currentCount.kind === "crib" ? `${countedPlayer?.name ?? "Dealer"}'s crib` : `${countedPlayer?.name ?? "Player"}'s hand`}
       hand={countedCards} starter={countStarter} isCrib={currentCount.kind === "crib"} points={number(currentCount.points)}
-      canContinue={aiReviewReady} waiting={alreadyAcknowledged}
+      canContinue={aiReviewReady} waiting={alreadyAcknowledged} players={players} acknowledgements={acknowledgements}
       onContinue={() => send("ACK_COUNT", { eventId: state.pendingEventId })}
     />}
     {showHistory && <div className="mp-history-modal" role="dialog" aria-modal="true" aria-labelledby="mp-history-title" onClick={() => setShowHistory(false)}>

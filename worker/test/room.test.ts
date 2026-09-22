@@ -88,14 +88,36 @@ describe("GameRoom authority", () => {
     expect(view?.players.find((player) => player.id === hostId)?.teamId).toBe("gold");
   });
 
-  it("rejects stale commands and caches duplicate results", async () => {
+  it("accepts delayed intents and caches duplicate results", async () => {
     const host = await createHost();
-    const stale = await stub.executeForTest(command("SET_READY", { ready: true }, host.id, crypto.randomUUID(), 0));
-    expect(stale).toMatchObject({ ok: false, error: { code: "STALE_REVISION" } });
+    const delayed = await stub.executeForTest(command("SET_READY", { ready: true }, host.id, crypto.randomUUID(), 0));
+    expect(delayed).toMatchObject({ ok: true, event: { data: { ready: true } } });
+    if (delayed.ok) revision = delayed.revision;
     const id = crypto.randomUUID();
-    const first = await send("SET_READY", { ready: true }, host.id, id);
+    const first = await send("SET_READY", { ready: false }, host.id, id);
     const duplicate = await stub.executeForTest(command("SET_READY", { ready: false }, host.id, id, 0));
     expect(duplicate).toEqual(first);
+  });
+
+  it("accepts independent player actions sent from the same room revision", async () => {
+    const host = await createHost();
+    const guestId = String(acceptedData(await send("JOIN_ROOM", { name: "Guest", avatarId: "f-2" })).playerId);
+    const sharedRevision = revision;
+
+    const hostReady = await stub.executeForTest(command("SET_READY", { ready: true }, host.id, crypto.randomUUID(), sharedRevision));
+    expect(hostReady).toMatchObject({ ok: true, event: { data: { ready: true } } });
+    const guestReady = await stub.executeForTest(command("SET_READY", { ready: true }, guestId, crypto.randomUUID(), sharedRevision));
+    expect(guestReady).toMatchObject({ ok: true, event: { data: { ready: true } } });
+
+    const view = await stub.viewForTest(host.id);
+    expect(view?.players.find((player) => player.id === host.id)?.ready).toBe(true);
+    expect(view?.players.find((player) => player.id === guestId)?.ready).toBe(true);
+  });
+
+  it("rejects a command claiming a future room revision", async () => {
+    const host = await createHost();
+    const future = await stub.executeForTest(command("SET_READY", { ready: true }, host.id, crypto.randomUUID(), revision + 1));
+    expect(future).toMatchObject({ ok: false, error: { code: "STALE_REVISION" } });
   });
 
   it("reconnects only with the secret token", async () => {

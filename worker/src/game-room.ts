@@ -198,8 +198,13 @@ export class GameRoom extends DurableObject<Env> {
     try {
       if (command.roomId !== this.state.roomId) throw new ProtocolError("ROOM_MISMATCH", "Command targets another room.");
       const secureReconnect = command.type === "JOIN_ROOM" && Boolean(command.payload.reconnectToken);
-      if (command.expectedRevision !== this.state.revision && !secureReconnect) {
-        throw new ProtocolError("STALE_REVISION", "Refresh room state before retrying.");
+      // A client can legitimately be behind when another player's command was
+      // serialized first. Apply that intent to the current authoritative state;
+      // every command below validates its phase, actor, and payload before it
+      // mutates anything. Reject only a revision from the future, which cannot
+      // have been produced by this room.
+      if (command.expectedRevision > this.state.revision && !secureReconnect) {
+        throw new ProtocolError("STALE_REVISION", "Room revision is ahead of the server.");
       }
       const data = await this.apply(command, socket);
       this.state.lastActivityAt = Date.now();
